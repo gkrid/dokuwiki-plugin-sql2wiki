@@ -81,7 +81,7 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
         }
 
         // updated the position to point to the tag content
-        $start = $pos + strpos($match, "\n");
+        $start = $pos + strpos($match, '>') + 1; //closing char of opening tag
         $end = $pos + strlen($match) - strlen('</sql2wiki>');
         $data = ['db' => $attributes['db'],
             'query_name' => $attributes['query'],
@@ -161,109 +161,6 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
             $renderer->doc .= '</table>';
             return true;
         }
-
-//        if ($mode == 'xhtml' && $state == DOKU_LEXER_ENTER) {
-//            /** @var $DBI helper_plugin_sqlite */
-//            $DBI = plugin_load('helper', 'sqlite');
-//
-//            /** @var $helper helper_plugin_sqlite */
-//            $sqlite_db = plugin_load('helper', 'sqlite');
-//            $sqlite_db->init('sqlite', DOKU_PLUGIN . 'sqlite/db/');
-//
-//            $db = $match['db'];
-//            $query_name = $match['query_name'];
-//            $parsers = $match['parsers'];
-//            $args = $match['args'];
-//
-//            // process args special variables
-//            $args = str_replace(
-//                array(
-//                    '$ID$',
-//                    '$NS$',
-//                    '$PAGE$',
-//                    '$USER$',
-//                    '$TODAY$'
-//                ),
-//                array(
-//                    $INFO['id'],
-//                    getNS($INFO['id']),
-//                    noNS($INFO['id']),
-//                    isset($_SERVER['REMOTE_USER']) ? $_SERVER['REMOTE_USER'] : '',
-//                    date('Y-m-d')
-//                ),
-//                $args
-//            );
-//
-//            $res = $sqlite_db->query("SELECT sql FROM queries WHERE db=? AND name=?", $db, $query_name);
-//            $sql = $sqlite_db->res2single($res);
-//            if (empty($sql)) {
-//                msg('Unknown database: ' . $db . ' or query name: ' . $query_name, -1);
-//                return false;
-//            }
-//
-//            if (!$DBI->init($db, '')) {
-//                msg('Cannot initialize db: ' . $db, -1);
-//                return false;
-//            }
-//
-//            $res = $DBI->query($sql, $args);
-//            if (!$res) {
-//                msg('Cannot execute query: ' . $sql, -1);
-//                return false;
-//            }
-//            $result = $DBI->res2arr($res);
-//
-//            if (!$result) {
-//                $renderer->cdata($this->getLang('none'));
-//                return true;
-//            }
-//
-//            // check if we use any parsers
-//            if (count($parsers) > 0) {
-//                $class_name = '\dokuwiki\plugin\struct\meta\Column';
-//                if (!class_exists($class_name)) {
-//                    msg('Install struct plugin to use parsers', -1);
-//                    return false;
-//                }
-//                $parser_types = $class_name::allTypes();
-//            }
-//
-//            $renderer->doc .= '<div>';
-//            $ths = array_keys($result[0]);
-//            $renderer->doc .= '<table class="inline">';
-//            $renderer->doc .= '<tr>';
-//            foreach ($ths as $th) {
-//                $renderer->doc .= '<th>' . hsc($th) . '</th>';
-//            }
-//            $renderer->doc .= '</tr>';
-//            foreach ($result as $row) {
-//                $renderer->doc .= '<tr>';
-//                $tds = array_values($row);
-//                foreach ($tds as $i => $td) {
-//                    if ($td === null) $td = '␀';
-//                    if (isset($parsers[$i])) {
-//                        $parser_class = $parsers[$i]['class'];
-//                        $parser_config = $parsers[$i]['config'];
-//                        if (!isset($parser_types[$parser_class])) {
-//                            msg('Unknown parser: ' . $parser_class, -1);
-//                            $renderer->doc .= '<td>' . hsc($td) . '</td>';
-//                        } else {
-//                            /** @var \dokuwiki\plugin\struct\types\AbstractBaseType $parser */
-//                            $parser = new $parser_types[$parser_class]($parser_config);
-//                            $renderer->doc .= '<td>';
-//                            $parser->renderValue($td, $renderer, $mode);
-//                            $renderer->doc .= '</td>';
-//                        }
-//                    } else {
-//                        $renderer->doc .= '<td>' . hsc($td) . '</td>';
-//                    }
-//                }
-//                $renderer->doc .= '</tr>';
-//            }
-//            $renderer->doc .= '</table>';
-//            $renderer->doc .= '</div>';
-//            return true;
-//        }
         return false;
     }
 }
