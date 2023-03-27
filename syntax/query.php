@@ -52,13 +52,6 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
             return null;
         }
         $tag_value = (string) $xml[0];
-//        if ($tag_value !== '') {
-//            msg('sql2wiki tag content must be empty.', -1);
-//            return null;
-//        }
-
-//        list($db, $query_name) = explode('.', $tag_value);
-
         $parsers = [];
         $needle = 'parser_';
         foreach ($attributes as $name => $value) {
@@ -81,8 +74,8 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
         }
 
         // updated the position to point to the tag content
-        $start = $pos + strpos($match, '>') + 1; //closing char of opening tag
-        $end = $pos + strlen($match) - strlen('</sql2wiki>');
+        $start = $pos + strpos($match, '>'); // closing char of the opening tag
+        $end = $pos + strlen($match) - strlen('</sql2wiki>') - 1;
         $data = ['db' => $attributes['db'],
             'query_name' => $attributes['query'],
             'parsers' => $parsers,
@@ -90,32 +83,33 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
             'value' => $tag_value,
             'start' => $start,
             'end' => $end];
-        return [$state, $data];
+        return $data;
     }
 
     /** @inheritDoc */
     public function render($mode, Doku_Renderer $renderer, $data)
     {
         if ($data === null) return false;
-        list($state, $match) = $data;
 
         if ($mode == 'metadata') {
             if (!isset($renderer->meta['plugin_sql2wiki'])) {
                 $renderer->meta['plugin_sql2wiki'] = [];
             }
-            $renderer->meta['plugin_sql2wiki'][] = $match;
+            $renderer->meta['plugin_sql2wiki'][] = $data;
             return true;
         }
         if ($mode == 'xhtml') {
-            $result = Csv::csv2arr($match['value']);
+            $result = Csv::csv2arr($data['value']);
 
             if (count($result) == 0) {
+                $renderer->p_open();
                 $renderer->cdata($this->getLang('none'));
+                $renderer->p_close();
                 return true;
             }
 
             // check if we use any parsers
-            $parsers = $match['parsers'];
+            $parsers = $data['parsers'];
             if (count($parsers) > 0) {
                 $class_name = '\dokuwiki\plugin\struct\meta\Column';
                 if (!class_exists($class_name)) {
@@ -125,16 +119,21 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
                 $parser_types = $class_name::allTypes();
             }
 
-            $renderer->doc .= '<table class="inline">';
-            $renderer->doc .= '<tr>';
+            $renderer->table_open();
+            $renderer->tablethead_open();
+            $renderer->tablerow_open();
             $headers = array_shift($result);
             foreach ($headers as $header) {
-                $renderer->doc .= '<th>' . hsc($header) . '</th>';
+                $renderer->tableheader_open();
+                $renderer->cdata($header);
+                $renderer->tableheader_close();
             }
-            $renderer->doc .= '</tr>';
+            $renderer->tablerow_close();
+            $renderer->tablethead_close();
 
+            $renderer->tabletbody_open();
             foreach ($result as $row) {
-                $renderer->doc .= '<tr>';
+                $renderer->tablerow_open();
                 $tds = array_values($row);
                 foreach ($tds as $i => $td) {
                     if ($td === null) $td = '␀';
@@ -143,22 +142,26 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
                         $parser_config = $parsers[$i]['config'];
                         if (!isset($parser_types[$parser_class])) {
                             msg('Unknown parser: ' . $parser_class, -1);
-                            $renderer->doc .= '<td>' . hsc($td) . '</td>';
+                            $renderer->tablecell_open();
+                            $renderer->cdata($td);
+                            $renderer->tablecell_close();
                         } else {
                             /** @var \dokuwiki\plugin\struct\types\AbstractBaseType $parser */
                             $parser = new $parser_types[$parser_class]($parser_config);
-                            $renderer->doc .= '<td>';
+                            $renderer->tablecell_open();
                             $parser->renderValue($td, $renderer, $mode);
-                            $renderer->doc .= '</td>';
+                            $renderer->tablecell_close();
                         }
                     } else {
-                        $renderer->doc .= '<td>' . hsc($td) . '</td>';
+                        $renderer->tablecell_open();
+                        $renderer->cdata($td);
+                        $renderer->tablecell_close();
                     }
                 }
-                $renderer->doc .= '</tr>';
+                $renderer->tablerow_close();
             }
-
-            $renderer->doc .= '</table>';
+            $renderer->tabletbody_close();
+            $renderer->table_close();
             return true;
         }
         return false;

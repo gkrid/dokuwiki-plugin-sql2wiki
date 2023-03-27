@@ -34,13 +34,10 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         foreach ($pages as $page) {
             $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
             if (!$sql2wiki_data) continue;
-
-            foreach ($sql2wiki_data as $sql2wiki_query) {
-                // we can have several <sql2wiki> tags on the page. Ignore the tag if it refers to the database
-                // other than the one that has triggered the event
-                if ($sql2wiki_query['db'] != $db) continue;
-                $this->update_query_results($page, $sql2wiki_query);
-            }
+            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($db) {
+                return $query['db'] == $db;
+            }); // ignore the queries that not refers to currently changed database
+            $this->update_query_results($page, $sql2wiki_filtered);
         }
     }
 
@@ -54,62 +51,63 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         foreach ($pages as $page) {
             $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
             if (!$sql2wiki_data) continue;
-            foreach ($sql2wiki_data as $sql2wiki_query) {
-                // we can have several <sql2wiki> tags on the page. Ignore the tag if it refers to the other query
-                // than currently saved
-                if ($sql2wiki_query['db'] != $upstream || $sql2wiki_query['query_name'] != $query_name) continue;
-                $this->update_query_results($page, $sql2wiki_query);
-            }
+            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($upstream, $query_name) {
+                return $query['db'] == $upstream && $query['query_name'] == $query_name;
+            }); // ignore the queries that not refers to currently saved query
+            $this->update_query_results($page, $sql2wiki_filtered);
         }
     }
 
     public function handle_action_act_preprocess(Doku_Event $event, $param)
     {
-        global $ID;
+        global $ID, $INFO;
 
-        if ($event->data != 'regeneratesqlsitetools') return;
+        if ($event->data != 'refreshqueriesresutls') return;
+        if ($INFO['perm'] < AUTH_EDIT) return; // only user who can read the page can update queries this way
+
         $sql2wiki_data = p_get_metadata($ID, 'plugin_sql2wiki');
         if (!$sql2wiki_data) return;
+        $this->update_query_results($ID, $sql2wiki_data);
 
-        foreach ($sql2wiki_data as $sql2wiki_query) {
-            $this->update_query_results($ID, $sql2wiki_query);
-        }
         $event->data = 'redirect';
     }
 
-    protected function update_query_results($page, $sql2wiki_query) {
-        // get the page content for every query because it could be changed by previous contents updates
+    protected function update_query_results($page, $sql2wiki_data) {
         $page_content = file_get_contents(wikiFN($page));
+        $offset = 0;
+        foreach ($sql2wiki_data as $sql2wiki_query) {
+            $sqliteDb = new SQLiteDB($sql2wiki_query['db'], '');
+            $querySaver = new QuerySaver($sqliteDb->getDBName());
+            $query = $querySaver->getQuery($sql2wiki_query['query_name']);
+            if ($query) {
+                $params = str_replace([
+                    '$ID$',
+                    '$NS$',
+                    '$PAGE$'
+                ], [
+                    $page,
+                    getNS($page),
+                    noNS($page)
+                ], $sql2wiki_query['args']);
 
-        $sqliteDb = new SQLiteDB($sql2wiki_query['db'], '');
-        $querySaver = new QuerySaver($sqliteDb->getDBName());
-        $query = $querySaver->getQuery($sql2wiki_query['query_name']);
-        if ($query) {
-            $params = str_replace([
-                '$ID$',
-                '$NS$',
-                '$PAGE$'
-            ], [
-                $page,
-                getNS($page),
-                noNS($page)
-            ], $sql2wiki_query['args']);
-
-            $result = $sqliteDb->queryAll($query, $params);
-            if (isset($result[0])) { // generate header if any row exists
-                array_unshift($result, array_keys($result[0]));
+                $result = $sqliteDb->queryAll($query, $params);
+                if (isset($result[0])) { // generate header if any row exists
+                    array_unshift($result, array_keys($result[0]));
+                }
+                $query_result_csv = "\n" . Csv::arr2csv($result); // "\n" to wrap the <sql2wiki> tag
+            } else { //unknown query - clear the results
+                $query_result_csv = "";
             }
-            $query_result_csv = "\n" . Csv::arr2csv($result); // "\n" to wrap the <sql2wiki> tag
-        } else { //unknown query - clear the results
-            $query_result_csv = "";
-        }
 
-        $start = $sql2wiki_query['start'];
-        $end = $sql2wiki_query['end'];
-        $length = $end - $start;
-        $updated_content = substr_replace($page_content, $query_result_csv, $start - 1, $length);
+            $start = $sql2wiki_query['start'];
+            $end = $sql2wiki_query['end'];
+            $length = $end - $start;
+            $updated_content = substr_replace($page_content, $query_result_csv, $start + $offset, $length);
+            $offset = strlen($updated_content) - strlen($page_content);
+            $page_content = $updated_content;
+        }
         // due to the dokuwiki mechanism the save will be only performed if content changed, so we don't need
         // to check it here
-        saveWikiText($page, $updated_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
+        saveWikiText($page, $page_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
     }
 }

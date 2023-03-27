@@ -1,6 +1,6 @@
 <?php
 
-use dokuwiki\plugin\sql2wiki\RegenerateSqlSiteTools;
+use dokuwiki\plugin\sql2wiki\RefreshQueriesResutls;
 
 /**
  * DokuWiki Plugin sql2wiki (Action Component)
@@ -19,11 +19,13 @@ class action_plugin_sql2wiki_menu extends DokuWiki_Action_Plugin
 
     public function handle_menu_items_assembly(Doku_Event $event)
     {
-        global $ID, $auth;
+        global $ACT, $INFO;
 
+        if(!$INFO['writable']) return false; // only users who have write permission can refresh the queries results
+        if ($ACT != 'show') return false; // the action is available only in 'show' state
         if ($event->data['view'] != 'page') return false;
 
-        array_splice($event->data['items'], -1, 0, [new RegenerateSqlSiteTools()]);
+        array_splice($event->data['items'], -1, 0, [new RefreshQueriesResutls()]);
 
         return true;
     }
