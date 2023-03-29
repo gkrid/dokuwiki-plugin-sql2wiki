@@ -24,7 +24,7 @@ class action_plugin_sql2wiki_menu extends DokuWiki_Action_Plugin
         if(!$INFO['writable']) return false; // only users who have write permission can refresh the queries results
         if ($ACT != 'show') return false; // the action is available only in 'show' state
         if ($event->data['view'] != 'page') return false;
-        if (!$INFO['meta']['plugin_sql2wiki']) return false; // no queries on the current page
+        if (!isset($INFO['meta']['plugin_sql2wiki'])) return false; // no queries on the current page
 
         $label = $this->getLang('btn_refresh_queries_results');
         array_splice($event->data['items'], -1, 0, [new RefreshQueriesResutls($label)]);

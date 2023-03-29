@@ -64,11 +64,9 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
 
         if ($event->data != 'refreshqueriesresutls') return;
         if ($INFO['perm'] < AUTH_EDIT) return; // only user who can read the page can update queries this way
+        if (!isset($INFO['meta']['plugin_sql2wiki'])) return;
 
-        $sql2wiki_data = p_get_metadata($ID, 'plugin_sql2wiki');
-        if (!$sql2wiki_data) return;
-        $this->update_query_results($ID, $sql2wiki_data);
-
+        $this->update_query_results($ID, $INFO['meta']['plugin_sql2wiki']);
         $event->data = 'redirect';
     }
 
