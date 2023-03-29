@@ -14,7 +14,7 @@ use dokuwiki\plugin\sql2wiki\Csv;
 
 class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
 {
-    const PLUGIN_SQL2WIKI_EDIT_SUMMARY = 'plugin: sql2wiki';
+    const PLUGIN_SQL2WIKI_EDIT_SUMMARY = 'plugin sql2wiki';
 
     /** @inheritDoc */
     public function register(Doku_Event_Handler $controller)
