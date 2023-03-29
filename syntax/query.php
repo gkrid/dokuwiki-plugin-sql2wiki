@@ -38,7 +38,7 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
     public function handle($match, $state, $pos, Doku_Handler $handler)
     {
         libxml_use_internal_errors(true);
-        $xml = simplexml_load_string($match);
+        $xml = simplexml_load_string($match, 'SimpleXMLElement', LIBXML_NOENT);
         if ($xml === false) {
             msg('Syntax: "'.hsc($match) . '" is not valid xml', -1);
             return null;
@@ -51,7 +51,11 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
             msg('"db" and "query" attributes are required.', -1);
             return null;
         }
-        $tag_value = (string) $xml[0];
+
+        // we use substr instead of simplexml to get the raw content
+        $content_start = strpos($match, '>') + 1;
+        $tag_value = substr($match, $content_start, -strlen('</sql2wiki>'));
+
         $parsers = [];
         $needle = 'parser_';
         foreach ($attributes as $name => $value) {
@@ -73,7 +77,6 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
             $args = array_map('trim', explode(',', $attributes['args']));
         }
 
-        // updated the position to point to the tag content
         $start = $pos + strpos($match, '>'); // closing char of the opening tag
         $end = $pos + strlen($match) - strlen('</sql2wiki>') - 1;
         $data = ['db' => $attributes['db'],

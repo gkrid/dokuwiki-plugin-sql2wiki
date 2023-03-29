@@ -27,11 +27,16 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
 
     public function handle_plugin_sqlite_query_execute(Doku_Event $event, $param)
     {
+        global $ID;
+
         if ($event->data['stmt']->rowCount() == 0) return; // ignore select queries
         $db = $event->data['sqlitedb']->getDbName();
         $indexer = idx_get_indexer();
         $pages = $indexer->lookupKey('sql2wiki_db', $db);
         foreach ($pages as $page) {
+            if ($page == $ID) continue; // don't modify the page we are currently viewing
+            if (checklock($page)) continue; // don't update the page that is currently locked
+
             $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
             if (!$sql2wiki_data) continue;
             $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($db) {
@@ -72,6 +77,7 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
 
     protected function update_query_results($page, $sql2wiki_data) {
         $page_content = file_get_contents(wikiFN($page));
+        $old_page_content = $page_content;
         $offset = 0;
         foreach ($sql2wiki_data as $sql2wiki_query) {
             $sqliteDb = new SQLiteDB($sql2wiki_query['db'], '');
