@@ -38,7 +38,7 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
     public function handle($match, $state, $pos, Doku_Handler $handler)
     {
         libxml_use_internal_errors(true);
-        $xml = simplexml_load_string($match, 'SimpleXMLElement', LIBXML_NOENT);
+        $xml = simplexml_load_string($match);
         if ($xml === false) {
             msg('Syntax: "'.hsc($match) . '" is not valid xml', -1);
             return null;

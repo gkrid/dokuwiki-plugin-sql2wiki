@@ -16,6 +16,8 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
 {
     const PLUGIN_SQL2WIKI_EDIT_SUMMARY = 'plugin sql2wiki';
 
+    protected $queue = [];
+
     /** @inheritDoc */
     public function register(Doku_Event_Handler $controller)
     {
@@ -23,27 +25,32 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $controller->register_hook('PLUGIN_SQLITE_QUERY_SAVE', 'AFTER', $this, 'handle_plugin_sqlite_query_change');
         $controller->register_hook('PLUGIN_SQLITE_QUERY_DELETE', 'AFTER', $this, 'handle_plugin_sqlite_query_change');
         $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_preprocess');
+        $controller->register_hook('DOKUWIKI_DONE', 'AFTER', $this, 'handle_dokuwiki_done');
+        // support for struct inline edits
+        $controller->register_hook('AJAX_CALL_UNKNOWN', 'AFTER', $this, 'handle_dokuwiki_done');
+    }
+
+    public function handle_dokuwiki_done(Doku_Event $event, $param)
+    {
+        $indexer = idx_get_indexer();
+        $dbs = array_keys($this->queue);
+        $dbs_pages = $indexer->lookupKey('sql2wiki_db', $dbs);
+        $pages = array_unique(array_merge(...array_values($dbs_pages)));
+        foreach ($pages as $page) {
+            $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
+            if (!$sql2wiki_data) continue;
+            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($dbs) {
+                return in_array($query['db'], $dbs);
+            }); // ignore the queries that not refers to currently changed databases
+            $this->update_query_results($page, $sql2wiki_filtered);
+        }
     }
 
     public function handle_plugin_sqlite_query_execute(Doku_Event $event, $param)
     {
-        global $ID;
-
         if ($event->data['stmt']->rowCount() == 0) return; // ignore select queries
         $db = $event->data['sqlitedb']->getDbName();
-        $indexer = idx_get_indexer();
-        $pages = $indexer->lookupKey('sql2wiki_db', $db);
-        foreach ($pages as $page) {
-            if ($page == $ID) continue; // don't modify the page we are currently viewing
-            if (checklock($page)) continue; // don't update the page that is currently locked
-
-            $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
-            if (!$sql2wiki_data) continue;
-            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($db) {
-                return $query['db'] == $db;
-            }); // ignore the queries that not refers to currently changed database
-            $this->update_query_results($page, $sql2wiki_filtered);
-        }
+        $this->queue[$db] = true;
     }
 
     public function handle_plugin_sqlite_query_change(Doku_Event $event, $param)
@@ -75,9 +82,9 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $event->data = 'redirect';
     }
 
+
     protected function update_query_results($page, $sql2wiki_data) {
         $page_content = file_get_contents(wikiFN($page));
-        $old_page_content = $page_content;
         $offset = 0;
         foreach ($sql2wiki_data as $sql2wiki_query) {
             $sqliteDb = new SQLiteDB($sql2wiki_query['db'], '');
