@@ -25,14 +25,16 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $controller->register_hook('PLUGIN_SQLITE_QUERY_SAVE', 'AFTER', $this, 'handle_plugin_sqlite_query_change');
         $controller->register_hook('PLUGIN_SQLITE_QUERY_DELETE', 'AFTER', $this, 'handle_plugin_sqlite_query_change');
         $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_preprocess');
-        $controller->register_hook('DOKUWIKI_DONE', 'AFTER', $this, 'handle_dokuwiki_done');
+        // update pages after all saving and metadata updating has happened
+        // if we updated the page we are currently viewing, redirect to updated version
+        $controller->register_hook('ACTION_HEADERS_SEND', 'AFTER', $this, 'handle_action_headers_send');
         // support for struct inline edits
         $controller->register_hook('AJAX_CALL_UNKNOWN', 'AFTER', $this, 'handle_ajax_call_unknown');
     }
 
-    public function handle_dokuwiki_done(Doku_Event $event, $param)
+    public function handle_action_headers_send(Doku_Event $event, $param)
     {
-        global $ID;
+        global $ID, $ACT;
 
         $indexer = idx_get_indexer();
         $dbs = array_keys($this->queue);
@@ -52,7 +54,7 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
                 if ($page_content != $updated_content) {
                     // the page can be just updated so wait a second to update changelog correctly
                     sleep(1);
-                    saveWikiText($page, $page_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
+                    saveWikiText($page, $updated_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
                     $current_page_changed = true;
                 }
             } else {
@@ -60,8 +62,8 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
             }
         }
         // refresh the page if it was updated by the plugin
-        if ($current_page_changed) {
-            $go = wl($ID, true, '&');
+        if ($current_page_changed && $ACT == 'show') {
+            $go = wl($ID, '', true, '&');
             send_redirect($go);
         }
     }
@@ -164,7 +166,7 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $page_content = file_get_contents(wikiFN($page));
         $updated_content = $this->get_updated_page_content($page_content, $page, $sql2wiki_data);
         if ($page_content != $updated_content) {
-            saveWikiText($page, $page_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
+            saveWikiText($page, $updated_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
             return true;
         }
         return false;
