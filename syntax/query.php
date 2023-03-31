@@ -79,13 +79,17 @@ class syntax_plugin_sql2wiki_query extends \dokuwiki\Extension\SyntaxPlugin
 
         $start = $pos + strpos($match, '>'); // closing char of the opening tag
         $end = $pos + strlen($match) - strlen('</sql2wiki>') - 1;
-        $data = ['db' => $attributes['db'],
+        $data = [
+            'db' => $attributes['db'],
             'query_name' => $attributes['query'],
             'parsers' => $parsers,
             'args' => $args,
             'value' => $tag_value,
             'start' => $start,
-            'end' => $end];
+            'end' => $end,
+            'pos' => $pos,
+            'match' => $match
+        ];
         return $data;
     }
 
