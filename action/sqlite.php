@@ -27,10 +27,46 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_preprocess');
         $controller->register_hook('DOKUWIKI_DONE', 'AFTER', $this, 'handle_dokuwiki_done');
         // support for struct inline edits
-        $controller->register_hook('AJAX_CALL_UNKNOWN', 'AFTER', $this, 'handle_dokuwiki_done');
+        $controller->register_hook('AJAX_CALL_UNKNOWN', 'AFTER', $this, 'handle_ajax_call_unknown');
     }
 
     public function handle_dokuwiki_done(Doku_Event $event, $param)
+    {
+        global $ID;
+
+        $indexer = idx_get_indexer();
+        $dbs = array_keys($this->queue);
+        $dbs_pages = $indexer->lookupKey('sql2wiki_db', $dbs);
+        $pages = array_unique(array_merge(...array_values($dbs_pages)));
+        $current_page_changed = false;
+        foreach ($pages as $page) {
+            $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
+            if (!$sql2wiki_data) continue;
+            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($dbs) {
+                return in_array($query['db'], $dbs);
+            }); // ignore the queries that not refers to currently changed databases
+            if ($page == $ID) {
+                // we are changing the page we are currently viewing
+                $page_content = file_get_contents(wikiFN($page));
+                $updated_content = $this->get_updated_page_content($page_content, $page, $sql2wiki_filtered);
+                if ($page_content != $updated_content) {
+                    // the page can be just updated so wait a second to update changelog correctly
+                    sleep(1);
+                    saveWikiText($page, $page_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
+                    $current_page_changed = true;
+                }
+            } else {
+                $this->update_query_results($page, $sql2wiki_filtered);
+            }
+        }
+        // refresh the page if it was updated by the plugin
+        if ($current_page_changed) {
+            $go = wl($ID, true, '&');
+            send_redirect($go);
+        }
+    }
+
+    public function handle_ajax_call_unknown(Doku_Event $event, $param)
     {
         $indexer = idx_get_indexer();
         $dbs = array_keys($this->queue);
@@ -82,9 +118,7 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $event->data = 'redirect';
     }
 
-
-    protected function update_query_results($page, $sql2wiki_data) {
-        $page_content = file_get_contents(wikiFN($page));
+    protected function get_updated_page_content($page_content, $page, $sql2wiki_data) {
         $offset = 0;
         foreach ($sql2wiki_data as $sql2wiki_query) {
             $sqliteDb = new SQLiteDB($sql2wiki_query['db'], '');
@@ -117,8 +151,22 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
             $offset = strlen($updated_content) - strlen($page_content);
             $page_content = $updated_content;
         }
-        // due to the dokuwiki mechanism the save will be only performed if content changed, so we don't need
-        // to check it here
-        saveWikiText($page, $page_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
+        return $page_content;
+    }
+
+    /**
+     * @param $page
+     * @param $sql2wiki_data
+     * @return bool is page content changed
+     * @throws Exception
+     */
+    protected function update_query_results($page, $sql2wiki_data) {
+        $page_content = file_get_contents(wikiFN($page));
+        $updated_content = $this->get_updated_page_content($page_content, $page, $sql2wiki_data);
+        if ($page_content != $updated_content) {
+            saveWikiText($page, $page_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
+            return true;
+        }
+        return false;
     }
 }
