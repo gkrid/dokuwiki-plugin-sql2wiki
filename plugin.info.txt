@@ -1,7 +1,7 @@
 base   sql2wiki
 author Szymon Olewniczak
 email  it@rid.pl
-date   2023-03-31
+date   2023-04-03
 name   sql2wiki plugin
 desc   Save results of sqlite queries into page syntax.
 url    https://www.dokuwiki.org/plugin:sql2wiki

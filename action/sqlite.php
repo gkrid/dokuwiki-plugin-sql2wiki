@@ -15,13 +15,38 @@ use dokuwiki\plugin\sql2wiki\Csv;
 class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
 {
     const PLUGIN_SQL2WIKI_EDIT_SUMMARY = 'plugin sql2wiki';
-    const PLUGIN_SQL2WIKI_EDIT_SUMMARY_INFINITE_LOOP = 'plugin sql2wiki: prevent infinite loop';
+    const PLUGIN_SQL2WIKI_EDIT_SUMMARY_INFINITE_LOOP = 'plugin sql2wiki: syntax commented out: query results may depend on page revision';
 
     /** @var array databases that has changed */
     protected $queue = [];
 
-    /** @var array the pages that has already been updated */
-    protected $updated = [];
+    protected function queue_put($db, $query_name='') {
+        if (!isset($this->queue[$db])) {
+            $this->queue[$db] = [];
+        }
+        // if query_name is not specified, update all database queries and don't consider future query_name
+        if (empty($query_name)) {
+            $this->queue[$db] = true;
+        }
+        // add new query_name if we still did not request all database queries update
+        if (is_array($this->queue[$db])) {
+            $this->queue[$db][$query_name] = true;
+        }
+    }
+
+    protected function queue_filtered($sql2wiki_data) {
+        // ignore the queries that have not been changed in this request
+        $queue = $this->queue;
+        return array_filter($sql2wiki_data, function ($query) use ($queue) {
+            $db = $query['db'];
+            $query_name = $query['query_name'];
+            return isset($queue[$db]) && ($queue[$db] === true || isset($queue[$db][$query_name]));
+        });
+    }
+
+    protected function queue_clean() {
+        $this->queue = [];
+    }
 
     /** @inheritDoc */
     public function register(Doku_Event_Handler $controller)
@@ -29,14 +54,13 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $controller->register_hook('PLUGIN_SQLITE_QUERY_EXECUTE', 'AFTER', $this, 'handle_plugin_sqlite_query_execute');
         $controller->register_hook('PLUGIN_SQLITE_QUERY_SAVE', 'AFTER', $this, 'handle_plugin_sqlite_query_change');
         $controller->register_hook('PLUGIN_SQLITE_QUERY_DELETE', 'AFTER', $this, 'handle_plugin_sqlite_query_change');
-//        $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_preprocess');
         // update pages after all saving and metadata updating has happened
-        $controller->register_hook('DOKUWIKI_DONE', 'AFTER', $this, 'check_pages_for_updates');
-        // if we updated the page we are currently viewing, redirect to updated version
+        $controller->register_hook('DOKUWIKI_DONE', 'AFTER', $this, 'update_pages_content');
+        // if we have updated the page we are currently viewing, redirect to updated version
         // this is why we are using ACTION_HEADERS_SEND event here
         $controller->register_hook('ACTION_HEADERS_SEND', 'AFTER', $this, 'check_current_page_for_updates');
         // support for struct inline edits
-        $controller->register_hook('AJAX_CALL_UNKNOWN', 'AFTER', $this, 'handle_ajax_call_unknown');
+        $controller->register_hook('AJAX_CALL_UNKNOWN', 'AFTER', $this, 'update_pages_content');
     }
 
     public function check_current_page_for_updates(Doku_Event $event, $param) {
@@ -47,118 +71,52 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
         $sql2wiki_data = p_get_metadata($ID, 'plugin_sql2wiki');
         if (!$sql2wiki_data) return;
 
+        // check if we have some resutls updates
         $something_changed = $this->update_query_results($ID, $sql2wiki_data, 1);
         if ($something_changed) {
+            // update other pages in queue and redirect
+            $this->update_pages_content($event, [$ID]);
             $go = wl($ID, '', true, '&');
             send_redirect($go);
         }
-        // we are changing the page we are currently viewing
-//        $page_content = file_get_contents(wikiFN($ID));
-//        // check for updates
-//        $updated_content = $this->get_updated_page_content($page_content, $ID, $sql2wiki_data);
-//        if ($page_content != $updated_content) {
-//            // the page can be just updated so wait a second to update changelog correctly
-//            sleep(1);
-//            saveWikiText($ID, $updated_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
-//            $updated_content2 = $this->get_updated_page_content($page_content, $ID, $sql2wiki_data);
-//            if ($updated_content != $updated_content2) {
-//                $wrapped_content = $this->get_page_content_with_wrapped_tags($updated_content2, $sql2wiki_data);
-//                sleep(1);
-//                saveWikiText($ID, $wrapped_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY_INFINITE_LOOP);
-//            }
-//
-//            $go = wl($ID, '', true, '&');
-//            send_redirect($go);
-//        }
     }
 
-    public function check_pages_for_updates(Doku_Event $event, $param)
-    {
+    public function update_pages_content(Doku_Event $event, $param) {
         global $ID;
+
+        $filter_ids = []; // don't update specific pages
+        if (!is_null($param)) $filter_ids = $param;
 
         $indexer = idx_get_indexer();
         $dbs = array_keys($this->queue);
         $dbs_pages = $indexer->lookupKey('sql2wiki_db', $dbs);
         $pages = array_unique(array_merge(...array_values($dbs_pages)));
         foreach ($pages as $page) {
+            if (in_array($page, $filter_ids)) continue;
             $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
             if (!$sql2wiki_data) continue;
-            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($dbs) {
-                return in_array($query['db'], $dbs);
-            }); // ignore the queries that not refers to currently changed databases
-
+            $sql2wiki_filtered = $this->queue_filtered($sql2wiki_data);
             // the $ID is usually updated in check_current_page_for_updates
             // but when $ACT != 'show' the current page might be not updated yet
             $sleep = $page == $ID ? 1 : 0;
             $this->update_query_results($page, $sql2wiki_filtered, $sleep);
-
-//            if ($page == $ID) {
-//                $page_content = file_get_contents(wikiFN($ID));
-//                $updated_content = $this->get_updated_page_content($page_content, $ID, $sql2wiki_data);
-//                if ($page_content != $updated_content) {
-//                    // the page can be just updated so wait a second to update changelog correctly
-//                    sleep(1);
-//                    saveWikiText($ID, $updated_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
-//                    $go = wl($ID, '', true, '&');
-//                    send_redirect($go);
-//                }
-//            } else {
-//                $this->update_query_results($page, $sql2wiki_filtered);
-//            }
         }
-    }
-
-    public function handle_ajax_call_unknown(Doku_Event $event, $param)
-    {
-        $indexer = idx_get_indexer();
-        $dbs = array_keys($this->queue);
-        $dbs_pages = $indexer->lookupKey('sql2wiki_db', $dbs);
-        $pages = array_unique(array_merge(...array_values($dbs_pages)));
-        foreach ($pages as $page) {
-            $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
-            if (!$sql2wiki_data) continue;
-            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($dbs) {
-                return in_array($query['db'], $dbs);
-            }); // ignore the queries that not refers to currently changed databases
-            $this->update_query_results($page, $sql2wiki_filtered);
-        }
+        $this->queue_clean();
     }
 
     public function handle_plugin_sqlite_query_execute(Doku_Event $event, $param)
     {
         if ($event->data['stmt']->rowCount() == 0) return; // ignore select queries
         $db = $event->data['sqlitedb']->getDbName();
-        $this->queue[$db] = true;
+        $this->queue_put($db);
     }
 
     public function handle_plugin_sqlite_query_change(Doku_Event $event, $param)
     {
         $upstream = $event->data['upstream'];
         $query_name = $event->data['name'];
-        $index_key = $upstream . '.' . $query_name;
-        $indexer = idx_get_indexer();
-        $pages = $indexer->lookupKey('sql2wiki_query_name', $index_key);
-        foreach ($pages as $page) {
-            $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
-            if (!$sql2wiki_data) continue;
-            $sql2wiki_filtered = array_filter($sql2wiki_data, function ($query) use ($upstream, $query_name) {
-                return $query['db'] == $upstream && $query['query_name'] == $query_name;
-            }); // ignore the queries that not refers to currently saved query
-            $this->update_query_results($page, $sql2wiki_filtered);
-        }
+        $this->queue_put($upstream, $query_name);
     }
-
-//    public function handle_action_act_preprocess(Doku_Event $event, $param)
-//    {
-//        global $ID, $INFO;
-//
-//        if ($event->data != 'refreshqueriesresutls') return;
-//        if ($INFO['perm'] < AUTH_EDIT) return; // only user who can read the page can update queries this way
-//        if (!isset($INFO['meta']['plugin_sql2wiki'])) return;
-//
-//        $this->update_query_results($ID, $INFO['meta']['plugin_sql2wiki']);
-//        $event->data = 'redirect';
-//    }
 
     protected function get_page_content_with_wrapped_tags($page_content, $sql2wiki_data) {
         $offset = 0;
@@ -210,20 +168,13 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
     }
 
     protected function update_query_results($page, $sql2wiki_data, $sleep=0) {
-        global $cache_metadata;
-
         $page_content = file_get_contents(wikiFN($page));
         $updated_content = $this->get_updated_page_content($page_content, $page, $sql2wiki_data);
         if ($page_content != $updated_content) {
             sleep($sleep); // wait if we are processing currently viewed page
             saveWikiText($page, $updated_content, self::PLUGIN_SQL2WIKI_EDIT_SUMMARY);
-            // remove memory cached meatadata
-
-            // refresh metadata
-//            unset($cache_metadata[$page]);
-//            $sql2wiki_data = p_get_metadata($page, 'plugin_sql2wiki');
             $next_update = $this->get_updated_page_content($page_content, $page, $sql2wiki_data);
-            // this means that the query results depends on page revisions which leads to infinite loop
+            // this may mean that the query results depend on page revisions which leads to infinite loop
             if ($updated_content != $next_update) {
                 // comment out <sql2wiki> tags to prevent infinite loop
                 $wrapped_content = $this->get_page_content_with_wrapped_tags($page_content, $sql2wiki_data);
