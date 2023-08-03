@@ -133,6 +133,13 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
 
     protected function get_updated_page_content($page_content, $page, $sql2wiki_data) {
         $offset = 0;
+        $logger_details = [
+            'page' => $page,
+            'before_page_content' => $page_content,
+            'sql2wiki_data' => $sql2wiki_data,
+            'results' => []
+        ];
+
         foreach ($sql2wiki_data as $sql2wiki_query) {
             $sqliteDb = new SQLiteDB($sql2wiki_query['db'], '');
             $querySaver = new QuerySaver($sqliteDb->getDBName());
@@ -153,8 +160,10 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
                     array_unshift($result, array_keys($result[0]));
                 }
                 $query_result_csv = "\n" . Csv::arr2csv($result); // "\n" to wrap the <sql2wiki> tag
+                $logger_details['results'][] = $result;
             } else { //unknown query - clear the results
                 $query_result_csv = "";
+                $logger_details['results'][] = null;
             }
 
             $start = $sql2wiki_query['start'];
@@ -163,6 +172,17 @@ class action_plugin_sql2wiki_sqlite extends \dokuwiki\Extension\ActionPlugin
             $updated_content = substr_replace($page_content, $query_result_csv, $start + $offset, $length);
             $offset = strlen($updated_content) - strlen($page_content);
             $page_content = $updated_content;
+        }
+        $before_sql2wiki_opening_tags = substr_count($logger_details['before_page_content'], '<sql2wiki');
+        $before_sql2wiki_closing_tags = substr_count($logger_details['before_page_content'], '</sql2wiki>');
+        $after_sql2wiki_opening_tags = substr_count($page_content, '<sql2wiki');
+        $after_sql2wiki_closing_tags = substr_count($page_content, '</sql2wiki>');
+        if ($before_sql2wiki_opening_tags != $after_sql2wiki_opening_tags ||
+            $before_sql2wiki_closing_tags != $after_sql2wiki_closing_tags ||
+            $after_sql2wiki_opening_tags != $after_sql2wiki_closing_tags
+        ) {
+            $logger_details['after_page_content'] = $page_content;
+            \dokuwiki\Logger::error('sql2wiki', $logger_details, __FILE__, __LINE__);
         }
         return $page_content;
     }
